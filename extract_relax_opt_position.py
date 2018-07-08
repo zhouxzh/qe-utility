@@ -7,7 +7,6 @@ import numpy as np
 parser = argparse.ArgumentParser()
 parser.add_argument("out",help="The vc-relax output file of qe")
 args = parser.parse_args()
-print(args.out)
 
 with open(args.out) as f:
     for line in f:
