@@ -30,9 +30,9 @@ with open(args.out) as f:
                     for i in range(3):
                         new_atomic = float(atomic[i+1])/alat
                         if new_atomic < 0:
-                            new_atomic = new_atomic + alat
+                            new_atomic = new_atomic + 1
                         if new_atomic > alat:
-                            new_atomic = new_atomic - alat
+                            new_atomic = new_atomic - 1
                         atomic[i+1]='%10.6f'%(new_atomic)
                     print(' '.join(atomic))
                 line=f.readline()
