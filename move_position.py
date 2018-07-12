@@ -17,6 +17,8 @@ else:
 atomic_position = []
 with open(args.out) as f:
     for line in f:
+        if 'ATOMIC_POSITION' in line:
+            print(line, end='')
         m = re.search(r'^[A-Z][a-z]?\b',line)
         if m:
             atomic_position.append(line)
