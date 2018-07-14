@@ -38,6 +38,8 @@ for i in atomic_position:
         new_atomic = new_atomic - x0[j] + point[j]
         if new_atomic < 0:
             new_atomic = new_atomic + 1
+        if new_atomic > 1:
+            new_atomic = new_atomic - 1
         atomic[j+1] = '%10.6f'%(new_atomic)
     print(' '.join(atomic))
 
