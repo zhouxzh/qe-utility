@@ -29,11 +29,9 @@ for i in atomic_position:
     atomic = i.split()
     for j in range(3):
         new_atomic = float(atomic[j+1])
-        new_atomic = new_atomic - x0[j]+0.5
+        new_atomic = new_atomic - x0[j]
         if new_atomic < 0:
             new_atomic = new_atomic + 1
-        if new_atomic > 1:
-            new_atomic = new_atomic - 1
         atomic[j+1] = '%10.6f'%(new_atomic)
     print(' '.join(atomic))
 
