@@ -21,7 +21,7 @@ else:
 
 for my_dir in os.listdir():
     if os.path.isdir(my_dir):
-        if re.search('\d+(\.\d*)?', my_dir):
+        if re.search('^\d+(\.\d*)?', my_dir):
             print(my_dir)
             dst_dir = os.path.join(results_dir, my_dir)
             if not os.path.isdir(dst_dir):
