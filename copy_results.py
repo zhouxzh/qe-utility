@@ -33,6 +33,12 @@ for my_dir in os.listdir():
                     print(my_file)
                     dst_file = os.path.join(results_dir, my_dir, my_file)
                     shutil.copy(src_file, dst_file)
+                if 'scf' not in args.out:
+                    if 'band' in args.out:
+                        if 'scf' in my_file:
+                            print(my_file)
+                            dst_file = os.path.join(results_dir, my_dir, my_file)
+                            shutil.copy(src_file, dst_file)
 
 
 
