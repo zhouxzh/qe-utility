@@ -3,14 +3,18 @@
 import numpy as np
 import matplotlib.pyplot as plt
 import os
-from io import BytesIO
-from io import StringIO
-from scipy.interpolate import CubicSpline
-from scipy.optimize import fmin
+from scipy.interpolate import CubicSpline, UnivariateSpline
+from scipy.optimize import fmin, fmin_l_bfgs_b
+import argparse
 import re
 
 b2a = 0.52917706
+Emax = 5
+Emin = -5
 
+parser = argparse.ArgumentParser()
+parser.add_argument("out", choices=['step', 'lattice', 'band', 'rashba'], help="The kind of file want to plot")
+args = parser.parse_args()
 
 def plot_energy_step(energy_step):
     plt.figure()
@@ -31,10 +35,10 @@ def plot_lattice_energy(lattice, energy):
     cs = CubicSpline(lattice, energy)
     x = np.linspace(min(lattice),max(lattice), 100)
     plt.plot(x*b2a, cs(x))
-    plt.xlabel(r'Lattice Constant ($\AA$)')
+    plt.xlabel(r'Lattice Constant ($\mathrm{\AA}$)')
     plt.ylabel('Energy (Ry)')
     plt.tight_layout()
-    plt.savefig('lattice_energy.pdf')
+    plt.savefig('lattice2energy.pdf')
 
 def search_energy():
     lattice=[]
@@ -47,7 +51,7 @@ def search_energy():
                 continue
             os.chdir(my_dir)
             for out_file in os.listdir('./'):
-                if out_file.find('relax.out')>=0:
+                if re.search('^scf.out', out_file):
                     print(my_dir, out_file)
                     with open(out_file) as f:
                         energy_step=[]
@@ -59,170 +63,269 @@ def search_energy():
             os.chdir('../')
     return lattice, energy
 
-def plot_sigle_band(data):
-    plt.figure()
-    circle = np.argwhere(data[:,0] == data[0,0])[:,0]
-    for i in range(len(circle)-1):
-        plt.plot(data[circle[i]:circle[i+1],0], data[circle[i]:circle[i+1],1])
-    plt.ylim(-5, 5)
-    plt.xlim(0, 2.5231)
-    positions = [0, 0.8660, 1.366, 1.816, 2.5231]
-    labels = [r'$\Gamma$', 'R', 'M', 'X', 'R']
-    plt.xticks(positions, labels)
-    plt.ylabel('Energy (eV)')
-    plt.savefig('bands.pdf')
-    plt.close()
 
-def plot_bm_band(data):
-    circle = np.argwhere(data[:,0] == data[0,0])[:,0]
-    vbm_up = data[circle[48]:circle[49],:]
-    vbm_down = data[circle[49]:circle[50],:]
-    cbm_up = data[circle[50]:circle[51],:]
-    cbm_down = data[circle[51]:circle[52],:]
+def filter_folder():
+    my_folder = []
+    lattice = []
+    for i in os.listdir('.'):
+        if os.path.isdir(i):
+            if re.search('\d+(\.\d*)?', i):
+                my_folder.append(i)
+    my_folder.sort()
+    return my_folder
+           
+
+def band(folder = '.'):
+    for i in os.listdir(folder):
+        if 'dat.gnu' in i:
+            j = 0
+            with open(folder+'/'+i) as f:
+                for line in f:
+                    if not line.strip():
+                        break
+                    j = j+1
+                f.close()
+            print(j)
+            data = np.genfromtxt(folder+'/'+i)
+            m, n = data.shape
+            k = m//j
+            data = data.reshape(k, j, n)
+            x = data[0,:,0]
+            plt.figure()
+            fermi = find_fermi(folder)
+            if not fermi:
+                fermi = 0
+            print('The Fermi energy is ',fermi, ' eV.')
+            for line in range(k):
+                plt.plot(x, data[line,:,1]-fermi)
+            plt.xlim(min(x), max(x))
+            plt.ylim(Emin, Emax)
+            plt.ylabel('Energy (eV)')
+            value, point = find_ticker(folder)
+            print(value, point)
+            plt.xticks(value, point)
+            plt.tight_layout()
+            plt.savefig(folder+'/bands.pdf')
+            
+
+def find_ticker(folder = '.'):
+    #print(folder)
+    for my_file in os.listdir(folder):
+        if 'bands.in' in my_file:
+            #print(my_file)
+            point = []
+            with open(folder+'/'+my_file) as f:
+                for line in f:
+                    if 'crystal_b' in line:
+                        point_nu = int(f.readline().strip())
+                        #print(point_nu)
+                        for i in range(point_nu):
+                            point.append(f.readline().split()[0])
+                        #print(point)
+                f.close()
+        if 'plotband.out' in my_file:
+            #print(my_file)
+            value = []
+            with open(folder+'/'+my_file) as f:
+                for line in f:
+                    if 'symmetry' in line:
+                        value.append(float(line.split()[-1]))
+                f.close()
+            #print(value)
+    return value, point
+
+
+def find_fermi(folder):
+    for my_file in os.listdir(folder):
+        if 'scf.out' in my_file:
+            print(my_file)
+            fermi = []
+            with open(folder+'/'+my_file) as f:
+                for line in f:
+                    if 'highest occupied' in line:
+                        m = re.findall('\d+\.\d*', line)
+                        if len(m) == 1:
+                            fermi = float(m[0])
+                        if len(m) == 2:
+                            fermi = (float(m[0])+float(m[1]))/2
+                        return fermi
+
+def find_electrons(folder = '.'):
+    for i in os.listdir(folder):
+        if 'scf.out' == i:
+            scf = os.path.join(folder, i)
+            with open(scf) as f:
+                for line in f:
+                    if 'number of electrons' in line:
+                        print(line.split())
+                        return int(float(line.split()[4]))
+
+def find_bm_band(folder = '.'):
+    for i in os.listdir(folder):
+        if 'dat.gnu' in i:
+            j = 0
+            with open(folder+'/'+i) as f:
+                for line in f:
+                    if not line.strip():
+                        break
+                    j = j+1
+                f.close()
+            print(j)
+            data = np.genfromtxt(folder+'/'+i)
+            m, n = data.shape
+            k = m//j
+            data = data.reshape(k, j, n)
+            x = data[0,:,0]
+            plt.figure()
+            fermi = find_fermi(folder)
+            if not fermi:
+                fermi = 0
+            print('The Fermi energy is ',fermi, ' eV.')
+            electrons = find_electrons(folder)
+            print('The number of electrons: ', electrons)
+            bm = data[electrons-2:electrons+2,:,1]-fermi
+            x = data[0,:,0]
+            return x, bm
+
+
+
+def plot_bm_band(folder, x, bm, value, point):
+    band = ['VBM', 'CBM']
+    spin = ['up', 'down']
     plt.figure()
-    plt.plot(vbm_up[:,0],vbm_up[:,1],label='VBM up')
-    plt.plot(vbm_down[:,0],vbm_down[:,1], label='VBM down')
-    plt.plot(cbm_up[:,0],cbm_up[:,1], label='CBM up')
-    plt.plot(cbm_down[:,0],cbm_down[:,1], label='CBM down')
-    plt.xlim(0, 2.5231)
-    positions = [0, 0.8660, 1.366, 1.816, 2.5231]
-    labels = [r'$\Gamma$', 'R', 'M', 'X', 'R']
-    plt.xticks(positions, labels)
-    plt.ylabel('Energy (eV)')
+    for i in range(2):
+        for j in range(2):
+            plt.plot(x, bm[i*2+j,:], label=band[i]+' spin '+spin[j])
     plt.legend()
-    plt.savefig('bm.pdf')
+    plt.xlim(min(x), max(x))
+    plt.ylabel('Energy (eV)')
+    plt.xticks(value, point)
+    plt.tight_layout()
+    plt.savefig(os.path.join(folder, 'bm_band.pdf'))
     plt.close()
 
-def plot_all_band():
-    lattice = []
-    for my_dir in os.listdir():
-        if os.path.isdir(my_dir):
-            os.chdir(my_dir)
-            lattice.append(float(my_dir))
-            print(my_dir)
-            for out_file in os.listdir():
-                if out_file.find('relax.out')>=0:
-                    print(out_file)
-                    with open(out_file) as f:
-                        for i in f:
-                            if i.find('highest')>=0:
-                                homo, lomo = i.split()[6::]
-                                fermi = (float(homo)+float(lomo))/2
-                    print(fermi)
-            for out_file in os.listdir():
-                if out_file.find('bands.dat.gnu')>=0:
-                    print(out_file)
-                    data = np.genfromtxt(out_file)
-                    data[:,1] = data[:,1]-fermi
-                    plot_sigle_band(data)
-                    plot_bm_band(data)
-            os.chdir('../')
 
-def rashba(lower, upper):
+
+def find_rashba(folder, x, bm, value, point):
+    lattice = float(folder)
+    rashba = []
+    band = ['VBM', 'CBM']
+    spin = ['up', 'down']
+    for i in range(2):
+        for j in range(2):
+            energy = bm[i*2+j,:]
+            R = point.index('R')
+            if R > 0 and R < len(point):
+                line_name = [point[R-1]+point[R], point[R]+point[R+1]]
+            for m in range(len(line_name)):
+                E0 = energy[x==value[i]]
+                if m == 0:
+                    bounds = [value[R-1], value[R]]
+                if m == 1:
+                    bounds = [value[R], value[R+1]]
+                k_slice = np.bitwise_and(bounds[0]<=x, x<=bounds[1])
+                k = x[k_slice]
+                e = energy[k_slice]
+                if i==0:
+                    e = -e
+                #  if np.min(e) == e[k==value[R]]:
+                    #  k0 = 0
+                    #  ER = 0
+                    #  alpha = 0
+                #  else:
+                    #cs = CubicSpline(k, e)
+                sp = UnivariateSpline(k, e, k=4)
+                sp1 = sp.derivative()
+                print(band[i], spin[j], line_name[m], sp1.roots(), sp1.roots().shape)
+                spdr = sp1.roots()
+                k0 = []
+                if len(spdr) == 0:
+                    k0 = 0
+                else:
+                    spdr = spdr[np.abs(spdr-value[R])<0.1]
+                    print(spdr)
+                    if len(spdr) == 0:
+                        k0 = 0
+                    elif len(spdr) > 1:
+                        print('error')
+                        exit()
+                    else:
+                        spdr = spdr[0]
+                if k0 == 0:
+                    ER = 0
+                    alpha = 0
+                else:
+                    k0 = (spdr-value[R])*2*np.pi/(lattice*b2a)
+                    ER = sp(spdr)-sp(value[R])
+                    #results = fmin(cs, value[R])
+                    #k0 = (results[0]-value[R])*2*np.pi/(lattice*b2a)
+                    #ER = cs(results)[0]-cs(value[R])
+                    #ER = e[k==value[R]]-np.min(e)
+                    #ER = ER[0]
+                    #k0 = np.abs(value[R]-k[np.argmin(e)])
+                    #k0 = k0*2*np.pi/(lattice*b2a)
+                    alpha = 2*ER/k0
+                rashba.append([lattice, band[i], spin[j], line_name[m], k0, ER, alpha])
+    return rashba
+
+def plot_rashba(rashba_lattice):
+    m, n, o = np.shape(rashba_lattice)
+    print(m, n ,o)
     lattice = []
-    ER = []
-    k0 = []
-    for my_dir in os.listdir():
-        if os.path.isdir(my_dir):
-            if re.search('\d+(\.\d*)?', my_dir):
-                lattice.append(float(my_dir))
+    for i in range(m):
+        lattice.append(rashba_lattice[i][0][0])
+    lattice = np.array(lattice)*b2a
+    print(lattice)
+    label_name = []
+    prefix = ['k_0', 'E_R', 'alpha']
+    for i in range(n):
+        label_name = '_'.join(rashba_lattice[0][i][1:4])
+        print(label_name)
+        for j in range(3):
+            print(prefix[j])
+            y = []
+            for k in range(m):
+                y.append(rashba_lattice[k][i][j+4])
+            plt.figure()
+            plt.plot(lattice, y)
+            if j == 0:
+                plt.xlabel('Lattice Constant ($\mathrm{\AA}$)')
+                plt.ylabel('Momentum offset (${\mathrm{\AA}}^{-1}$)')
+            elif j == 1:
+                plt.xlabel('Lattice Constant ($\mathrm{\AA}$)')
+                plt.ylabel('Rashba Energy (eV)')
             else:
-                continue
-            os.chdir(my_dir)
-            print(my_dir)
-            for out_file in os.listdir():
-                if out_file.find('relax.out')>=0:
-                    print(out_file)
-                    with open(out_file) as f:
-                        for i in f:
-                            if i.find('highest')>=0:
-                                homo, lomo = i.split()[6::]
-                                fermi = (float(homo)+float(lomo))/2
-                    print(fermi)
-            for out_file in os.listdir():
-                if out_file.find('bands.dat.gnu')>=0:
-                    print(out_file)
-                    data = np.genfromtxt(out_file)
-                    data[:,1] = data[:,1]-fermi
-                    circle = np.argwhere(data[:,0] == data[0,0])[:,0]
-                    vbm_up = data[circle[48]:circle[49],1]
-                    vbm_down = data[circle[49]:circle[50],1]
-                    cbm_up = data[circle[50]:circle[51],1]
-                    cbm_down = data[circle[51]:circle[52],1]
-                    k = data[circle[51]:circle[52],0]
-                    k_range = np.bitwise_and( k>= lower, k<= upper )
-                    vbm_up = vbm_up[k_range]
-                    vbm_down = vbm_down[k_range]
-                    cbm_up = cbm_up[k_range]
-                    cbm_down = cbm_down[k_range]
-                    k = k[k_range]
-                    print(k)
-                    ER_vbm_up = max(vbm_up)-vbm_up[k==0.866]
-                    ER_vbm_down = max(vbm_down)-vbm_down[k==0.866]
-                    ER_cbm_up = min(cbm_up)-cbm_up[k==0.866]
-                    ER_cbm_down = min(cbm_down)-cbm_down[k==0.866]
-                    k0_vbm_up = k[np.argmax(vbm_up)]-0.866
-                    k0_vbm_down = k[np.argmax(vbm_down)]-0.866
-                    k0_cbm_up = k[np.argmin(cbm_up)]-0.866
-                    k0_cbm_down = k[np.argmin(cbm_down)]-0.866
-                    print(ER_vbm_up, ER_vbm_down, ER_cbm_up, ER_cbm_down)
-                    print(k0_vbm_up, k0_vbm_down, k0_cbm_up, k0_cbm_down)
-                    cs = CubicSpline(k, cbm_up)
-                    minimum = fmin(cs, 0.866)
-                    k0.append(minimum[0]-0.866)
-                    ER.append(cs(minimum[0])-cs(0.866))
-            os.chdir('../')
-    lattice = np.array(lattice)
-    ER = np.array(ER)
-    k0 = np.array(k0)
-    ER = ER[np.argsort(lattice)]
-    k0 = k0[np.argsort(lattice)]
-    lattice = np.sort(lattice)
-    return lattice, np.abs(k0), np.abs(ER)
-
-def plot_rashba(lower, upper, prefix):
-    lattice, k0, ER = rashba(lower, upper)
-    plt.figure()
-    lattice = lattice * b2a
-    k0 = k0*2*np.pi/lattice
-    plt.plot(lattice, ER)
-    plt.xlabel('Lattice Constant ($\AA$)')
-    plt.ylabel('Rashba Energy (eV)')
-    plt.tight_layout()
-    plt.savefig(prefix+'_ER.pdf')
-    plt.close()
-    plt.figure()
-    plt.xlabel('Lattice Constant ($\AA$)')
-    plt.ylabel('Momentum offset (${\AA}^{-1}$)')
-    plt.plot(lattice, k0, label='VBM up')
-    plt.tight_layout()
-    plt.savefig(prefix+'_k0.pdf')
-    plt.close()
-    plt.figure()
-    plt.plot(lattice, ER/(2*k0))
-    plt.xlabel('Lattice Constant ($\AA$)')
-    plt.ylabel('Rashba coefficient (eV$\AA$)')
-    plt.tight_layout()
-    plt.savefig(prefix+'_alfa.pdf')
-    plt.close()
+                plt.xlabel('Lattice Constant ($\mathrm{\AA}$)')
+                plt.ylabel('Rashba coefficient (eV$\mathrm{\AA}$)')
+            plt.tight_layout()
+            plt.savefig(prefix[j]+'_'+label_name+'.pdf')
+            plt.close()
 
 
+if args.out == 'lattice':
+    lattice, energy = search_energy()
+    plot_lattice_energy(lattice, energy)
 
 
-#lattice, energy = search_energy()
-#plot_lattice_energy(lattice, energy)
-#plot_all_band()
+if args.out == 'band':
+    my_folder = filter_folder()
+    if my_folder:
+        for i in my_folder:
+            band(i)
+    else:
+        band()
 
 
-
-##### search gG-R #####
-lower = 0
-upper = 0.866
-prefix = 'GR'
-plot_rashba(lower, upper, prefix)
-
-##### search R-M #####
-lower = 0.866
-upper = 1.36
-prefix = 'RM'
-plot_rashba(lower, upper, prefix)
+if args.out == 'rashba':
+    my_folder = filter_folder()
+    if my_folder:
+        rashba_lattice = []
+        for i in my_folder:
+            print('The lattice constant is: ',i)
+            x, bm = find_bm_band(i)
+            value, point = find_ticker(i)
+            print(value, point)
+            plot_bm_band(i, x, bm, value, point)
+            rashba = find_rashba(i, x, bm, value, point)
+            rashba_lattice.append(rashba)
+    plot_rashba(rashba_lattice)
