@@ -2,11 +2,20 @@
 
 import numpy as np
 import matplotlib.pyplot as plt
+import matplotlib as mpl
 import os
 from scipy.interpolate import CubicSpline, UnivariateSpline
 from scipy.optimize import fmin, fmin_l_bfgs_b
 import argparse
 import re
+
+plt.style.use('seaborn-paper')
+#mpl.rcParams['axes.labelsize'] = 14
+#mpl.rcParams['xtick.labelsize'] = 12
+#mpl.rcParams['ytick.labelsize'] = 12
+#mpl.rcParams['font.size'] = 12
+mpl.rcParams['figure.figsize'] = (4.8, 3.2)
+
 
 b2a = 0.52917706
 Emax = 5
@@ -31,7 +40,7 @@ def plot_lattice_energy(lattice, energy):
     energy = energy[np.argsort(lattice)]
     lattice = np.sort(lattice)
     plt.figure()
-    plt.plot(lattice*b2a, energy, '*')
+    #plt.plot(lattice*b2a, energy, '*')
     cs = CubicSpline(lattice, energy)
     x = np.linspace(min(lattice),max(lattice), 100)
     plt.plot(x*b2a, cs(x))
@@ -40,28 +49,29 @@ def plot_lattice_energy(lattice, energy):
     plt.tight_layout()
     plt.savefig('lattice2energy.pdf')
 
-def search_energy():
-    lattice=[]
-    energy=[]
-    for my_dir in os.listdir('./'):
-        if os.path.isdir(my_dir):
-            if re.search('\d+(\.\d*)?', my_dir):
-                lattice.append(float(my_dir))
-            else:
-                continue
-            os.chdir(my_dir)
-            for out_file in os.listdir('./'):
-                if re.search('^scf.out', out_file):
-                    print(my_dir, out_file)
-                    with open(out_file) as f:
-                        energy_step=[]
-                        for i in f:
-                            if i.find('!')>=0:
-                                energy_step.append(float(i.split()[4]))
-                        #plot_energy_step(energy_step)
-                        energy.append(energy_step[-1])
+def find_energy(folder):
+    os.chdir(folder)
+    for out_file in os.listdir():
+        if re.search('^scf.out', out_file):
+            print(folder, out_file)
+            with open(out_file) as f:
+                energy_step=[]
+                for i in f:
+                    if i.find('!')>=0:
+                        energy_step.append(float(i.split()[4]))
             os.chdir('../')
-    return lattice, energy
+            energy = energy_step[-1]
+            return energy
+        elif re.search('^relax.out', out_file):
+            print(folder, out_file)
+            with open(out_file) as f:
+                energy_step=[]
+                for i in f:
+                    if i.find('!')>=0:
+                        energy_step.append(float(i.split()[4]))
+            os.chdir('../')
+            energy = energy_step[-1]
+            return energy
 
 
 def filter_folder():
@@ -69,7 +79,7 @@ def filter_folder():
     lattice = []
     for i in os.listdir('.'):
         if os.path.isdir(i):
-            if re.search('\d+(\.\d*)?', i):
+            if re.search('^\d+(\.\d*)?', i):
                 my_folder.append(i)
     my_folder.sort()
     return my_folder
@@ -104,6 +114,8 @@ def band(folder = '.'):
             value, point = find_ticker(folder)
             print(value, point)
             plt.xticks(value, point)
+            for i in value:
+                plt.plot([i,i], [Emin, Emax], color='0.75', linewidth=0.75)
             plt.tight_layout()
             plt.savefig(folder+'/bands.pdf')
             
@@ -121,6 +133,8 @@ def find_ticker(folder = '.'):
                         #print(point_nu)
                         for i in range(point_nu):
                             point.append(f.readline().split()[0])
+                            if point[-1]=='gG':
+                                point[-1] = '$\Gamma$'
                         #print(point)
                 f.close()
         if 'plotband.out' in my_file:
@@ -204,10 +218,19 @@ def plot_bm_band(folder, x, bm, value, point):
     plt.savefig(os.path.join(folder, 'bm_band.pdf'))
     plt.close()
 
+def find_lattice_constant(folder='.'):
+    for my_file in os.listdir(folder):
+        if 'in' in my_file:
+            with open(my_file) as f:
+                for line in f:
+                    if 'celldm(1)' in line:
+                        print(line)
+                        m = re.findall('\d+\.?\d*', line)
+                        if m:
+                            return float(m[1])
 
 
-def find_rashba(folder, x, bm, value, point):
-    lattice = float(folder)
+def find_rashba(lattice, x, bm, value, point):
     rashba = []
     band = ['VBM', 'CBM']
     spin = ['up', 'down']
@@ -255,8 +278,9 @@ def find_rashba(folder, x, bm, value, point):
                     ER = 0
                     alpha = 0
                 else:
-                    k0 = (spdr-value[R])*2*np.pi/(lattice*b2a)
-                    ER = sp(spdr)-sp(value[R])
+                    print(spdr, value[R], lattice)
+                    k0 = np.abs((spdr-value[R])*2*np.pi/(lattice*b2a))
+                    ER = np.abs(sp(spdr)-sp(value[R]))
                     #results = fmin(cs, value[R])
                     #k0 = (results[0]-value[R])*2*np.pi/(lattice*b2a)
                     #ER = cs(results)[0]-cs(value[R])
@@ -277,9 +301,9 @@ def plot_rashba(rashba_lattice):
     lattice = np.array(lattice)*b2a
     print(lattice)
     label_name = []
-    prefix = ['k_0', 'E_R', 'alpha']
+    prefix = ['k0', 'ER', 'alpha']
     for i in range(n):
-        label_name = '_'.join(rashba_lattice[0][i][1:4])
+        label_name = ''.join(rashba_lattice[0][i][1:4])
         print(label_name)
         for j in range(3):
             print(prefix[j])
@@ -298,12 +322,14 @@ def plot_rashba(rashba_lattice):
                 plt.xlabel('Lattice Constant ($\mathrm{\AA}$)')
                 plt.ylabel('Rashba coefficient (eV$\mathrm{\AA}$)')
             plt.tight_layout()
-            plt.savefig(prefix[j]+'_'+label_name+'.pdf')
+            plt.savefig(prefix[j]+''+label_name+'.pdf')
             plt.close()
 
 
 if args.out == 'lattice':
-    lattice, energy = search_energy()
+    my_folder = filter_folder()
+    energy = list(map(find_energy, my_folder))
+    lattice = list(map(float, my_folder))
     plot_lattice_energy(lattice, energy)
 
 
@@ -322,10 +348,22 @@ if args.out == 'rashba':
         rashba_lattice = []
         for i in my_folder:
             print('The lattice constant is: ',i)
-            x, bm = find_bm_band(i)
+            try:
+                x, bm = find_bm_band(i)
+            except:
+                continue
             value, point = find_ticker(i)
             print(value, point)
             plot_bm_band(i, x, bm, value, point)
-            rashba = find_rashba(i, x, bm, value, point)
+            rashba = find_rashba(float(i), x, bm, value, point)
             rashba_lattice.append(rashba)
-    plot_rashba(rashba_lattice)
+        plot_rashba(rashba_lattice)
+    else:
+        x, bm = find_bm_band()
+        value, point = find_ticker()
+        print(value, point)
+        plot_bm_band('.',x,bm,value,point)
+        lattice = find_lattice_constant()
+        print('The lattice constant is ', lattice*b2a)
+        rashba = find_rashba(lattice, x, bm, value, point)
+        print(rashba)
