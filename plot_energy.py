@@ -10,20 +10,14 @@ import argparse
 import re
 
 plt.style.use('seaborn-paper')
-#mpl.rcParams['axes.labelsize'] = 14
-#mpl.rcParams['xtick.labelsize'] = 12
-#mpl.rcParams['ytick.labelsize'] = 12
-#mpl.rcParams['font.size'] = 12
 mpl.rcParams['figure.figsize'] = (4.8, 3.2)
-
+from matplotlib import rc
+rc('text', usetex=True)
 
 b2a = 0.52917706
 Emax = 5
 Emin = -5
 
-parser = argparse.ArgumentParser()
-parser.add_argument("out", choices=['step', 'lattice', 'band', 'rashba'], help="The kind of file want to plot")
-args = parser.parse_args()
 
 def plot_energy_step(energy_step):
     plt.figure()
@@ -325,12 +319,17 @@ def plot_rashba(rashba_lattice):
             plt.savefig(prefix[j]+''+label_name+'.pdf')
             plt.close()
 
+parser = argparse.ArgumentParser()
+parser.add_argument("out", choices=['step', 'lattice', 'band', 'rashba'], help="The kind of file want to plot")
+args = parser.parse_args()
 
 if args.out == 'lattice':
     my_folder = filter_folder()
     energy = list(map(find_energy, my_folder))
     lattice = list(map(float, my_folder))
     plot_lattice_energy(lattice, energy)
+    np.savetxt('lattice.txt',(lattice, energy))
+
 
 
 if args.out == 'band':
@@ -367,3 +366,4 @@ if args.out == 'rashba':
         print('The lattice constant is ', lattice*b2a)
         rashba = find_rashba(lattice, x, bm, value, point)
         print(rashba)
+
